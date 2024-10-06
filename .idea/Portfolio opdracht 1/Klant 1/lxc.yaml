@@ -7,7 +7,7 @@
     container_disk_size: "30G"                # Grootte rootfs
     container_cpu_cores: 1                    # Aantal CPU cores
     container_memory_size: 1024               # Geheugen in MB
-    container_network_speed: 50               # Netwerksnelheid
+    container_network_speed: 400              # Netwerksnelheid in mbits!
     container_onboot: 1                       # Container automatisch starten
     container_os_template: "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst" # OS template
     ceph_pool: "Zwembad"                      # Naam van de Ceph pool
@@ -17,16 +17,17 @@
       block:
         - name: Genereer containernaam en ID voor elke container
           set_fact:
-            container_id: "{{ 100 + item }}"
-            container_name: "{{ container_name_prefix }}-{{ '%02d' | format(item) }}"
-          loop: "{{ range(1, container_count + 1) | list }}"
+            container_list: "{{ container_list | default([]) + [{'id': 101 + item, 'name': container_name_prefix + '-{:02d}'.format(item)}] }}"
+          loop: "{{ range(1, container_count) | list }}"
 
         - name: Maak containers aan
-          shell:
-            pct create {{ container_id }} {{ container_os_template }} 
-            --hostname {{ container_name }} 
+          shell: >
+            pct create {{ item.id }} {{ container_os_template }} 
+            --hostname {{ item.name }} 
             --cores {{ container_cpu_cores }} 
-            --memory {{ container_memory_size }}
-            --onboot {{ container_onboot }}
-            --net0 name=eth0,bridge=vmbr0,rate={{ container_network_speed }}
-            --rootfs {{ ceph_pool }}:{{ container_id }},size={{ container_disk_size }}
+            --memory {{ container_memory_size }} 
+            --onboot {{ container_onboot }} 
+            --net0 name=eth0,bridge=vmbr0,rate={{ container_network_speed }} 
+            --rootfs {{ ceph_pool }}:{{ item.id }},size={{ container_disk_size }}
+          loop: "{{ container_list }}"
+
