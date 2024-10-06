@@ -1,18 +1,73 @@
 ---
-- name: Maak Proxmox VM's aan voor EspoCRM
-  hosts: proxmox
+- name: Proxmox VM Creatie en Snapshot Cronjobs op pm2
+  hosts: pm2
+  become: yes
   vars:
-    vm_count: 3
-    vm_memory: 2048  # Aantal MB RAM per VM
-    vm_cpu: 2        # Aantal CPU cores per VM
-    disk_size: "20G" # Root disk grootte
-    template: "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"  # OS template
-    ceph_pool: "Zwembad" # Naam van de Ceph pool
-    base_vm_id: 100  # Basis VM ID
+    vm_count: 3                               # Aantal VM's dat je wilt aanmaken
+    image_url: http://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
+    image_name: focal-server-cloudimg-amd64.img
+    template_name_prefix: "cloud-init-focal"  # Prefix voor VM-namen
+    memory: 2048                              # Geheugen in MB
+    cpu_cores: 2                              # Aantal CPU cores
+    disk_size: 50G                            # Grootte van de disk
+    ceph_pool: Zwembad                        # Naam van de Ceph pool
+    script_directory: "/root/cronjob.sh"      # Directory waar de snapshot scripts worden opgeslagen
+    snapshot_crontijd1: "0 0 * * *"           # Eerste cronjob tijd (middernacht)
+    snapshot_crontijd2: "0 12 * * *"          # Tweede cronjob tijd (middag)
 
   tasks:
-    - name: Maak VM's aan
-      shell: >
-        qm create {{ base_vm_id + item }} --name EspoCRM-VM-{{ item }} --memory {{ vm_memory }} --cores {{ vm_cpu }} 
-        --net0 virtio,bridge=vmbr0 --ostype l26 --scsi0 {{ ceph_pool }}:{{ base_vm_id + item }},size={{ disk_size }}
-      loop: "{{ range(0, vm_count) | list }}"
+    - name: Installeer libguestfs-tools
+      shell: |
+        apt-get install -y libguestfs-tools
+
+    - name: Genereer VM-namen en IDs
+      set_fact:
+        vm_list: "{{ vm_list | default([]) + [{'id': 9000 + item, 'name': template_name_prefix + '-{{ item + 1 }}'}] }}"
+      loop: "{{ range(1, vm_count + 1) | list }}"
+
+    - name: Download cloud image en maak VM's aan
+      shell: |
+        wget -O /tmp/{{ image_name }} {{ image_url }}
+        virt-customize -a /tmp/{{ image_name }} --install qemu-guest-agent
+      loop: "{{ vm_list }}"
+      register: download_result
+
+    - name: Maak Proxmox VM aan
+      shell: |
+        qm create {{ item.id }} --memory {{ memory }} --net0 virtio,bridge=vmbr0 --sockets 1 --cores {{ cpu_cores }} --vcpu {{ cpu_cores }} --agent 1 --name {{ item.name }} --ostype l26
+        qm importdisk {{ item.id }} /tmp/{{ image_name }} {{ ceph_pool }}
+        qm set {{ item.id }} --scsihw virtio-scsi-pci --virtio0 {{ ceph_pool }}:vm-{{ item.id }}-disk-0,size={{ disk_size }}
+        qm set {{ item.id }} --ide2 {{ ceph_pool }}:cloudinit,size={{ disk_size }}
+        qm set {{ item.id }} --boot c --bootdisk virtio0
+        qm set {{ item.id }} --serial0 socket
+        qm template {{ item.id }}
+      loop: "{{ vm_list }}"
+
+    - name: Ruim gedownloade image op
+      file:
+        path: "/tmp/{{ image_name }}"
+        state: absent
+
+    - name: Creëer snapshot script
+      copy:
+        dest: "/root/snapshot_vms.sh"
+        content: |
+          #!/bin/bash
+          for vmid in 9001 9002 9003; do
+            pct snapshot $vmid daily_snapshot
+          done
+        mode: 0755
+
+    - name: Creëer cron job voor het snapshotten van VMs middag
+      cron:
+        name: "snapshot job"
+        minute: "0"
+        hour: "*/12"
+        job: "/root/snapshot_vms.sh"
+
+    - name: Creëer cron job voor het snapshotten van VMs middernacht
+      cron:
+        name: "snapshot job"
+        minute: "0"
+        hour: "0"
+        job: "/root/snapshot_vms.sh"

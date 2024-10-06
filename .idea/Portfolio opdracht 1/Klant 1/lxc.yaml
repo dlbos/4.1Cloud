@@ -1,6 +1,6 @@
 ---
 - name: Maak gebruikers aan, genereer SSH-sleutels en maak LXC-containers aan
-  hosts: proxmox1
+  hosts: pm1
   become: yes
   vars:
     users:
@@ -9,7 +9,7 @@
       - name: user2
         ssh_key_path: "/home/user2/.ssh/id_rsa.pub"  # Pad voor publieke sleutel van user2
     container_name_prefix: "WP"               # Prefix voor container namen
-    container_count: 2                        # Aantal containers
+    container_count: 10                       # Aantal containers
     container_disk_size: "30G"                # Grootte rootfs
     container_cpu_cores: 1                    # Aantal CPU cores
     container_memory_size: 1024               # Geheugen in MB
@@ -46,16 +46,19 @@
         mode: "0600"
       loop: "{{ users }}"
 
+    - name: Genereer containernaam en ID voor elke container
+      set_fact:
+        container_list: "{{ container_list | default([]) + [{'id': 100 + item, 'name': container_name_prefix + '-{:02d}'.format(item)}] }}"
+      loop: "{{ range(1, container_count + 1) | list }}"
+
     - name: Maak containers aan
       shell: >
-        pct create {{ item }} {{ container_os_template }}
-        --hostname {{ container_name_prefix }}-{{ item }}
+        pct create {{ item.id }} {{ container_os_template }}
+        --hostname {{ item.name }}
         --cores {{ container_cpu_cores }}
         --memory {{ container_memory_size }}
         --onboot {{ container_onboot }}
         --net0 name=eth0,bridge=vmbr0,rate={{ container_network_speed }}
-        --rootfs {{ ceph_pool }}:{{ item }},size={{ container_disk_size }}
-        --ssh-public-keys {{ users[0].ssh_key_path }} --ssh-public-keys {{ users[1].ssh_key_path }}
-      loop: "{{ range(1, container_count + 1) | list }}"
-      register: container_creation
+        --rootfs {{ ceph_pool }}:{{ item.id }},size={{ container_disk_size }}
+      loop: "{{ container_list }}"
 
