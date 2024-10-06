@@ -1,18 +1,16 @@
 ---
 - name: Maak meerdere LXC-containers voor WordPress aan op pm2
-  hosts: pm2
+  hosts: pm1
   vars:
     container_name_prefix: "WP"               # Prefix voor container namen
-    container_count: 3                        # Aantal containers
+    container_count: 10                       # Aantal containers
     container_disk_size: "30G"                # Grootte rootfs
     container_cpu_cores: 1                    # Aantal CPU cores
     container_memory_size: 1024               # Geheugen in MB
     container_network_speed: 50               # Netwerksnelheid
-    container_firewall: 1                     # Firewall inschakelen
     container_onboot: 1                       # Container automatisch starten
     container_os_template: "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst" # OS template
-    container_os_type: "debian"               # OS type
-    ceph_pool: "zwembad"                      # Naam van de Ceph pool
+    ceph_pool: "Zwembad"                      # Naam van de Ceph pool
 
   tasks:
     - name: Maak containers aan
@@ -23,28 +21,12 @@
             container_name: "{{ container_name_prefix }}-{{ '%02d' | format(item) }}"
           loop: "{{ range(1, container_count + 1) | list }}"
 
-        - name: Update de lijst van beschikbare container templates
-          command: pveam update
-          register: pveam_update_result
-          changed_when: "'already up to date' not in pveam_update_result.stdout"
-
-        - name: Download het gewenste template naar de storage locatie
-          command: pveam download debian-12-standard_12.7-1_amd64.tar.zst
-          register: pveam_download_result
-          changed_when: "'already downloaded' not in pveam_download_result.stdout"
-
         - name: Maak container aan als deze nog niet bestaat
-          command: >
+          shell:
             pct create {{ container_id }} {{ container_os_template }} 
             --hostname {{ container_name }} 
             --cores {{ container_cpu_cores }} 
             --memory {{ container_memory_size }}
             --onboot {{ container_onboot }}
             --net0 name=eth0,bridge=vmbr0,rate={{ container_network_speed }}
-            --firewall={{ container_firewall }} 
-            --ostype {{ container_os_type }}
             --rootfs {{ ceph_pool }}:{{ container_id }},size={{ container_disk_size }}
-
-        - name: Toon output van het container aanmaakproces
-          debug:
-            var: container_list.stdout
