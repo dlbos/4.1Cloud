@@ -1,0 +1,79 @@
+---
+- name: Installeer EspoCRM op de VM's
+  hosts: crm_nodes                      # Groep van de drie VM's
+  vars:
+    db_root_password: "rootpassword"    # Root wachtwoord voor MySQL
+    crm_admin_user: "crmadmin"          # Admin gebruiker voor EspoCRM
+    crm_admin_password: "crmpassword"   # Wachtwoord voor de admin gebruiker
+    crm_db_name: "espocrm"              # Database naam voor EspoCRM
+
+  tasks:
+    - name: Installeer noodzakelijke pakketten
+      apt:
+        name:
+          - apache2
+          - mysql-server
+          - php
+          - php-mysql
+          - php-xml
+          - php-mbstring
+          - php-curl
+          - git
+        state: present
+      become: yes
+
+    - name: Start en schakel Apache en MySQL in
+      service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - apache2
+        - mysql
+      become: yes
+
+    - name: Configureer de MySQL database voor EspoCRM
+      mysql_db:
+        name: "{{ crm_db_name }}"
+        state: present
+        login_password: "{{ db_root_password }}"
+      become: yes
+
+    - name: Maak de admin gebruiker aan voor EspoCRM
+      mysql_user:
+        name: "{{ crm_admin_user }}"
+        password: "{{ crm_admin_password }}"
+        priv: "{{ crm_db_name }}.*:ALL"
+        state: present
+        login_password: "{{ db_root_password }}"
+      become: yes
+
+    - name: Download en installeer EspoCRM
+      shell: >
+        wget https://github.com/espocrm/espocrm-installer/releases/latest/download/install.sh;
+        bash install.sh -y --ssl --letsencrypt --domain=lucas-espocrm.com --email=lucasbos982@gmail.com;
+      become: yes
+
+    - name: Configureer firewall
+      ufw:
+        rule: allow
+        name: "{{ item }}"
+      loop:
+        - 'Apache'
+        - 'MySQL'
+      become: yes
+
+    - name: Maak een admin SSH gebruiker aan
+      user:
+        name: "{{ crm_admin_user }}"
+        password: "{{ crm_admin_password }}"
+        shell: /bin/bash
+        state: present
+      become: yes
+
+    - name: Configureer SSH voor de admin gebruiker
+      authorized_key:
+        user: "{{ crm_admin_user }}"
+        state: present
+        key: "{{ lookup('file', '/path/to/your/public_key.pub') }}"  # Vervang door het pad naar je publieke sleutel
+      become: yes

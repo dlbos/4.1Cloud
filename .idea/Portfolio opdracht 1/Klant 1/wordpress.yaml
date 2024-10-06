@@ -1,0 +1,66 @@
+---
+- name: Installeer WordPress op LXC-containers
+  hosts: pm1
+  vars:
+    container_list: []                  # Hier komen de container gegevens
+    db_root_password: "rootpassword"    # MySQL root wachtwoord
+    wp_db_user: "wp_user"               # Database gebruiker voor WordPress
+    wp_db_password: "wppassword"        # Wachtwoord voor de WordPress database gebruiker
+    wp_db_name: "wordpress"             # Database naam voor WordPress
+    wp_admin_email: "admin@example.com" # Admin e-mailadres voor WordPress
+    wp_admin_user: "admin"              # WordPress admin gebruikersnaam
+    wp_admin_password: "adminpassword"  # WordPress admin wachtwoord
+
+  tasks:
+    - name: Installeer WordPress en afhankelijkheden op elke container
+      block:
+        - name: Installeer Apache, MySQL, PHP en extensies
+          shell: >
+            pct exec {{ item.id }} -- bash -c "
+              apt-get update && apt-get install -y apache2 mysql-server php php-mysql libapache2-mod-php php-cli php-curl php-zip php-gd php-mbstring php-xml;
+              systemctl enable apache2;
+              systemctl enable mysql;
+              systemctl start apache2;
+              systemctl start mysql;
+            "
+          loop: "{{ container_list }}"
+
+        - name: Configureer MySQL database voor WordPress
+          shell: >
+            pct exec {{ item.id }} -- bash -c "
+              mysql -u root -p{{ db_root_password }} -e \"CREATE DATABASE {{ wp_db_name }};\";
+              mysql -u root -p{{ db_root_password }} -e \"CREATE USER '{{ wp_db_user }}'@'localhost' IDENTIFIED BY '{{ wp_db_password }}';\";
+              mysql -u root -p{{ db_root_password }} -e \"GRANT ALL PRIVILEGES ON {{ wp_db_name }}.* TO '{{ wp_db_user }}'@'localhost';\";
+              mysql -u root -p{{ db_root_password }} -e \"FLUSH PRIVILEGES;\";
+            "
+          loop: "{{ container_list }}"
+
+        - name: Download WordPress
+          shell: >
+            pct exec {{ item.id }} -- bash -c "
+              wget -c http://wordpress.org/latest.tar.gz;
+              tar -xzvf latest.tar.gz;
+              mv wordpress/* /var/www/html/;
+              chown -R www-data:www-data /var/www/html/;
+              chmod -R 755 /var/www/html/;
+              cp /var/www/html/wp-config-sample.php /var/www/html/wp-config.php;
+              sed -i \"s/database_name_here/{{ wp_db_name }}/g\" /var/www/html/wp-config.php;
+              sed -i \"s/username_here/{{ wp_db_user }}/g\" /var/www/html/wp-config.php;
+              sed -i \"s/password_here/{{ wp_db_password }}/g\" /var/www/html/wp-config.php;
+            "
+          loop: "{{ container_list }}"
+
+        - name: Configureer WordPress admin gebruiker
+          shell: >
+            pct exec {{ item.id }} -- bash -c "
+              echo \"define('WP_HOME','http://localhost');\" >> /var/www/html/wp-config.php;
+              echo \"define('WP_SITEURL','http://localhost');\" >> /var/www/html/wp-config.php;
+              echo \"define('WP_DEBUG', false);\" >> /var/www/html/wp-config.php;
+              echo \"define('DB_HOST', 'localhost');\" >> /var/www/html/wp-config.php;
+            "
+          loop: "{{ container_list }}"
+
+    - name: Herstart Apache server
+      shell: >
+        pct exec {{ item.id }} -- bash -c "systemctl restart apache2;"
+      loop: "{{ container_list }}"

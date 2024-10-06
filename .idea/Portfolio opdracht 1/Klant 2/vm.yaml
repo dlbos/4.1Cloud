@@ -1,0 +1,18 @@
+---
+- name: Maak Proxmox VM's aan voor EspoCRM
+  hosts: proxmox
+  vars:
+    vm_count: 3
+    vm_memory: 2048  # Aantal MB RAM per VM
+    vm_cpu: 2        # Aantal CPU cores per VM
+    disk_size: "20G" # Root disk grootte
+    template: "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"  # OS template
+    ceph_pool: "Zwembad" # Naam van de Ceph pool
+    base_vm_id: 100  # Basis VM ID
+
+  tasks:
+    - name: Maak VM's aan
+      shell: >
+        qm create {{ base_vm_id + item }} --name EspoCRM-VM-{{ item }} --memory {{ vm_memory }} --cores {{ vm_cpu }} 
+        --net0 virtio,bridge=vmbr0 --ostype l26 --scsi0 {{ ceph_pool }}:{{ base_vm_id + item }},size={{ disk_size }}
+      loop: "{{ range(0, vm_count) | list }}"
