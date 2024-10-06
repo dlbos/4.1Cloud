@@ -1,0 +1,13 @@
+---
+- name: Apt Update en Upgrade
+  hosts: proxmoxen
+  become: yes
+  tasks:
+    - name: Update APT
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Upgrade pakketen
+      ansible.builtin.apt:
+        upgrade: dist

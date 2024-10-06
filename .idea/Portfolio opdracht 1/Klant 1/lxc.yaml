@@ -1,5 +1,5 @@
 ---
-- name: Maak meerdere LXC-containers voor WordPress aan op pm2
+- name: Maak meerdere LXC-containers aan en configureer SSH-toegang
   hosts: pm1
   vars:
     container_name_prefix: "WP"               # Prefix voor container namen
@@ -11,23 +11,78 @@
     container_onboot: 1                       # Container automatisch starten
     container_os_template: "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst" # OS template
     ceph_pool: "Zwembad"                      # Naam van de Ceph pool
+    user1: "user1"                            # Eerste gebruiker
+    user2: "user2"                            # Tweede gebruiker
+    user1_ssh_key_path: "/home/user1/.ssh/id_rsa"  # Pad naar SSH-sleutels van user1
+    user2_ssh_key_path: "/home/user2/.ssh/id_rsa"  # Pad naar SSH-sleutels van user2
 
   tasks:
     - name: Maak containers aan
       block:
         - name: Genereer containernaam en ID voor elke container
           set_fact:
-            container_list: "{{ container_list | default([]) + [{'id': 101 + item, 'name': container_name_prefix + '-{:02d}'.format(item)}] }}"
+            container_list: "{{ container_list | default([]) + [{'id': 100 + item, 'name': container_name_prefix + '-{:02d}'.format(item)}] }}"
           loop: "{{ range(1, container_count) | list }}"
 
-        - name: Maak containers aan
+#        - name: Maak containers aan
+#          shell: >
+#            pct create {{ item.id }} {{ container_os_template }}
+#            --hostname {{ item.name }}
+#            --cores {{ container_cpu_cores }}
+#            --memory {{ container_memory_size }}
+#            --onboot {{ container_onboot }}
+#            --net0 name=eth0,bridge=vmbr0,rate={{ container_network_speed }}
+#            --rootfs {{ ceph_pool }}:{{ item.id }},size={{ container_disk_size }}
+#          loop: "{{ container_list }}"
+
+    - name: Voeg users toe en configureer SSH toegang
+      block:
+        - name: Maak user1 en user2 aan op elke container en genereer SSH-sleutels als ze niet bestaan
           shell: >
-            pct create {{ item.id }} {{ container_os_template }} 
-            --hostname {{ item.name }} 
-            --cores {{ container_cpu_cores }} 
-            --memory {{ container_memory_size }} 
-            --onboot {{ container_onboot }} 
-            --net0 name=eth0,bridge=vmbr0,rate={{ container_network_speed }} 
-            --rootfs {{ ceph_pool }}:{{ item.id }},size={{ container_disk_size }}
+            pct exec {{ item.id }} -- bash -c "
+              # Maak users aan
+              useradd -m -s /bin/bash {{ user1 }};
+              useradd -m -s /bin/bash {{ user2 }};
+              mkdir -p /home/{{ user1 }}/.ssh /home/{{ user2 }}/.ssh;
+            
+              # Genereer SSH-sleutels voor user1 als ze nog niet bestaan
+              if [ ! -f {{ user1_ssh_key_path }} ]; then
+                ssh-keygen -t rsa -b 4096 -f {{ user1_ssh_key_path }} -N '';
+              fi;
+            
+              # Genereer SSH-sleutels voor user2 als ze nog niet bestaan
+              if [ ! -f {{ user2_ssh_key_path }} ]; then
+                ssh-keygen -t rsa -b 4096 -f {{ user2_ssh_key_path }} -N '';
+              fi;
+            "
           loop: "{{ container_list }}"
 
+    - name: Lees publieke sleutels van user1 en user2
+      set_fact:
+        user1_ssh_key: "{{ lookup('file', user1_ssh_key_path + '.pub') }}"
+        user2_ssh_key: "{{ lookup('file', user2_ssh_key_path + '.pub') }}"
+
+    - name: Kopieer SSH-sleutels naar de containers
+      block:
+        - name: Kopieer SSH-sleutel van user1 en user2 naar de containers
+          shell: >
+            pct exec {{ item.id }} -- bash -c "
+              echo '{{ user1_ssh_key }}' >> /home/{{ user1 }}/.ssh/authorized_keys;
+              echo '{{ user2_ssh_key }}' >> /home/{{ user2 }}/.ssh/authorized_keys;
+              chown -R {{ user1 }}:{{ user1 }} /home/{{ user1 }}/.ssh;
+              chown -R {{ user2 }}:{{ user2 }} /home/{{ user2 }}/.ssh;
+              chmod 700 /home/{{ user1 }}/.ssh;
+              chmod 600 /home/{{ user1 }}/.ssh/authorized_keys;
+              chmod 700 /home/{{ user2 }}/.ssh;
+              chmod 600 /home/{{ user2 }}/.ssh/authorized_keys
+            "
+          loop: "{{ container_list }}"
+
+        - name: Schakel root login en wachtwoord-inloggen uit
+          shell: >
+            pct exec {{ item.id }} -- bash -c "
+              sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config;
+              sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config;
+              systemctl restart sshd
+            "
+          loop: "{{ container_list }}"
