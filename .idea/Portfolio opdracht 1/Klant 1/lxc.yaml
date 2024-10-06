@@ -21,7 +21,7 @@
             container_name: "{{ container_name_prefix }}-{{ '%02d' | format(item) }}"
           loop: "{{ range(1, container_count + 1) | list }}"
 
-        - name: Maak container aan als deze nog niet bestaat
+        - name: Maak containers aan
           shell:
             pct create {{ container_id }} {{ container_os_template }} 
             --hostname {{ container_name }} 

@@ -1,0 +1,10 @@
+---
+- name: Download het gewenste template naar de storage locatie
+  hosts: proxmoxen
+  tasks:
+    - name: Download Debian 12 template
+      command: >
+      pveam download debian-12-standard_12.7-1_amd64.tar.zst
+
+
+      # wat ik denk dat de boosdoener was
