@@ -1,0 +1,39 @@
+---
+- name: Maak meerdere LXC-containers voor WordPress aan op pm2
+  hosts: pm2
+  vars:
+    container_name_prefix: "WP"              # Prefix voor container namen
+    container_count: 3                        # Aantal containers
+    container_disk_size: "30G"                # Grootte rootfs
+    container_cpu_cores: 1                    # Aantal CPU cores
+    container_memory_size: 1024               # Geheugen in MB
+    container_network_speed: "50MB/s"         # Netwerksnelheid
+    container_firewall: 1                     # Firewall inschakelen
+    container_os_template: "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"  # OS template
+    ceph_pool: "zwembad"                      # Naam van de Ceph pool
+
+  tasks:
+    - name: Maak containers aan
+      block:
+        - name: Genereer containernaam en ID voor elke container
+          set_fact:
+            container_id: "{{ 100 + item }}"
+            container_name: "{{ container_name_prefix }}-{{ '%02d' | format(item) }}"
+          loop: "{{ range(1, container_count + 1) | list }}"
+
+        - name: Maak container aan als deze nog niet bestaat
+          command: >
+            pct create {{ container_id }} {{ container_os_template }} 
+            --hostname {{ container_name }} 
+            --cores {{ container_cpu_cores }} 
+            --memory {{ container_memory_size }} 
+            --net0 name=eth0,bridge=vmbr0,rate={{ container_network_speed }},firewall={{ container_firewall }} 
+            --ostype debian 
+            --rootfs {{ ceph_pool }}:{{ container_id }},size={{ container_disk_size }}
+
+        - name: Start container als deze nog niet gestart is
+          command: pct start {{ container_id }}
+
+        - name: Toon output van het container aanmaakproces
+          debug:
+            var: container_list.stdout
